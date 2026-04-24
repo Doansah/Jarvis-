@@ -1,31 +1,32 @@
+"""Wake word controller interfaces and Porcupine stub implementation."""
+
 from abc import ABC, abstractmethod
-from time import time
+import logging
+
+LOGGER = logging.getLogger(__name__)
 
 
+class WakeController(ABC):
+    """Wake engine contract."""
 
-'''
-The first layer which identifies the wakeword, 
-from esp32: 
-1) Tells hardware to start recording..
-2) For how long 
-
-'''
-class wakeController(): 
     @abstractmethod
-    def startRecording(): 
-        pass 
+    def wait_for_wake(self) -> None:
+        raise NotImplementedError
+
     @abstractmethod
-    def stopRecording():
-        pass 
-
-class Porcupine(wakeController): 
-    def startRecording():
-        # INDICATE THAT audio device is listening (turn on led light) 
-        # Send http request... 
-        # Pass on recording to whisperAPI...
+    def record_segment(self, seconds: int = 7) -> bytes:
+        raise NotImplementedError
 
 
+class PorcupineWakeController(WakeController):
+    """Porcupine-backed wake controller stub.
 
+    Replace internals with real ESP32/Porcupine integration.
+    """
 
+    def wait_for_wake(self) -> None:
+        LOGGER.info("Waiting for wake word (Porcupine stub)...")
 
-
+    def record_segment(self, seconds: int = 7) -> bytes:
+        LOGGER.info("Recording audio segment (stub) for %s seconds", seconds)
+        return b""
