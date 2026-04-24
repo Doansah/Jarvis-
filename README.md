@@ -25,3 +25,13 @@ Potential implementations:
     a) if 'light' && 'on' then callGoveeAPI()
 
 perhaps default to deterministic solution, and fall back to AI
+
+
+### Additional Considerations 
+
+**Hardware Implementations:**
+- Audio Detection 
+    - distance (are multiple nodes necessary?)
+- Battery Powered / Stationed 
+- Communication Protocol: HTTP vs UDP vs WebSocket ...
+
