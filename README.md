@@ -24,6 +24,10 @@ Potential implementations:
 2) Deterministic Solution (Parser)
     a) if 'light' && 'on' then callGoveeAPI()
 
+3) Picovoice RHINO 
+
+infers user intent from spoken commands... 
+
 perhaps default to deterministic solution, and fall back to AI
 
 
@@ -35,3 +39,5 @@ perhaps default to deterministic solution, and fall back to AI
 - Battery Powered / Stationed 
 - Communication Protocol: HTTP vs UDP vs WebSocket ...
 
+
+j
