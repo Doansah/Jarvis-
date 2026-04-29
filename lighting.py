@@ -9,8 +9,10 @@ from config import (
     GOVEE_API_KEY,
     GOVEE_BASE_URL,
     GOVEE_DEVICE_ID_RICE_PAPER,
+    GOVEE_DEVICE_ID_SHORT_LAMP,
     GOVEE_DEVICE_ID_TALL_LAMP,
     GOVEE_DEVICE_SKU_RICE_PAPER,
+    GOVEE_DEVICE_SKU_SHORT_LAMP,
     GOVEE_DEVICE_SKU_TALL_LAMP,
     REQUEST_TIMEOUT_SEC,
 )
@@ -59,6 +61,7 @@ class GoveeLightController(LightController):
         target = target.upper()
         catalog = {
             "TALL_LAMP": {"sku": GOVEE_DEVICE_SKU_TALL_LAMP, "device": GOVEE_DEVICE_ID_TALL_LAMP},
+            "SHORT_LAMP": {"sku": GOVEE_DEVICE_SKU_SHORT_LAMP, "device": GOVEE_DEVICE_ID_SHORT_LAMP},
             "RICE_PAPER": {"sku": GOVEE_DEVICE_SKU_RICE_PAPER, "device": GOVEE_DEVICE_ID_RICE_PAPER},
         }
         if target == "ALL":

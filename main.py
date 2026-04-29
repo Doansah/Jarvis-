@@ -3,7 +3,7 @@
 from actions import dispatch_intent, parse_deterministic, parse_smart_fallback
 from config import USE_SMART_INTENT_FALLBACK, WAKE_RECORD_SECONDS
 from lighting import GoveeLightController
-from porcupine import PorcupineWakeController
+from porcupine import KeyboardWakeController
 from transcription import transcribe_whisper
 
 
@@ -19,7 +19,7 @@ def handle_transcript(text: str, lights: GoveeLightController) -> None:
 
 def run_once() -> None:
     """Run a single wake->record->transcribe->parse->execute cycle."""
-    wake_engine = PorcupineWakeController()
+    wake_engine = KeyboardWakeController()
     lights = GoveeLightController()
 
     wake_engine.wait_for_wake()
