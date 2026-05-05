@@ -9,6 +9,15 @@ from config import OPENAI_API_KEY, WHISPER_MODEL
 
 LOGGER = logging.getLogger(__name__)
 
+_client: openai.OpenAI | None = None
+
+
+def _get_client() -> openai.OpenAI:
+    global _client
+    if _client is None:
+        _client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    return _client
+
 
 def transcribe_whisper(audio_bytes: bytes) -> str:
     """Transcribe audio bytes with OpenAI Whisper."""
@@ -22,7 +31,7 @@ def transcribe_whisper(audio_bytes: bytes) -> str:
 
     LOGGER.info("Transcribing with model=%s (%d bytes)", WHISPER_MODEL, len(audio_bytes))
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    client = _get_client()
 
     audio_file = io.BytesIO(audio_bytes)
     audio_file.name = "audio.wav"

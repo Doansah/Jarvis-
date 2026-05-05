@@ -13,6 +13,12 @@ LOGGER = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
 CHANNELS = 1
 
+# VAD constants
+_VAD_CHUNK = 1600          # 100 ms per chunk at 16 kHz
+_SILENCE_RMS = 400         # below this → silence
+_SILENCE_SECS = 1.0        # stop after this many consecutive silent seconds
+_MIN_SPEECH_SECS = 0.5     # never stop before this many seconds of audio
+
 
 class WakeController(ABC):
     """Wake engine contract."""
@@ -38,25 +44,42 @@ class KeyboardWakeController(WakeController):
         input("\n[Jarvis] Press Enter to start recording...")
 
     def record_segment(self, seconds: int = 7) -> bytes:
-        LOGGER.info("Recording %s seconds...", seconds)
-        print(f"[Jarvis] Recording for {seconds}s — speak now")
+        LOGGER.info("Recording up to %s seconds (VAD enabled)...", seconds)
+        print(f"[Jarvis] Recording (up to {seconds}s) — speak now")
 
-        frames = sd.rec(
-            int(seconds * SAMPLE_RATE),
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype="int16",
-        )
-        sd.wait()
-        print("[Jarvis] Done recording")
+        max_chunks = int(seconds * SAMPLE_RATE / _VAD_CHUNK)
+        min_chunks = int(_MIN_SPEECH_SECS * SAMPLE_RATE / _VAD_CHUNK)
+        silence_chunks_needed = int(_SILENCE_SECS * SAMPLE_RATE / _VAD_CHUNK)
 
+        collected: list[np.ndarray] = []
+        silence_run = 0
+        speech_detected = False
+
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16") as stream:
+            for _ in range(max_chunks):
+                chunk, _ = stream.read(_VAD_CHUNK)
+                collected.append(chunk.copy())
+                rms = float(np.sqrt(np.mean(chunk.astype(np.float32) ** 2)))
+
+                if rms > _SILENCE_RMS:
+                    speech_detected = True
+                    silence_run = 0
+                elif speech_detected and len(collected) >= min_chunks:
+                    silence_run += 1
+                    if silence_run >= silence_chunks_needed:
+                        break
+
+        elapsed = len(collected) * _VAD_CHUNK / SAMPLE_RATE
+        print(f"[Jarvis] Done recording ({elapsed:.1f}s)")
+        LOGGER.info("Recorded %.1fs of audio", elapsed)
+
+        frames = np.concatenate(collected, axis=0)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(CHANNELS)
-            wf.setsampwidth(2)  # int16 = 2 bytes
+            wf.setsampwidth(2)
             wf.setframerate(SAMPLE_RATE)
             wf.writeframes(frames.tobytes())
-
         return buf.getvalue()
 
 

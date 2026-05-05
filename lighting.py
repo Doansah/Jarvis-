@@ -1,6 +1,7 @@
 """Lighting interfaces and Govee API adapter for Jarvis."""
 
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 import requests
@@ -18,6 +19,15 @@ from config import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+    return _session
 
 
 class LightController(ABC):
@@ -51,10 +61,17 @@ class GoveeLightController(LightController):
 
     def _apply(self, target: str, capability: str, value: int) -> bool:
         devices = self._resolve_targets(target)
-        ok = True
-        for device in devices:
-            ok = self._send_control_command(device["sku"], device["device"], capability, value) and ok
-        return ok
+        if not devices:
+            return True
+        if len(devices) == 1:
+            d = devices[0]
+            return self._send_control_command(d["sku"], d["device"], capability, value)
+        with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+            futures = [
+                executor.submit(self._send_control_command, d["sku"], d["device"], capability, value)
+                for d in devices
+            ]
+            return all(f.result() for f in as_completed(futures))
 
     @staticmethod
     def _resolve_targets(target: str) -> list[dict[str, str]]:
@@ -95,7 +112,8 @@ class GoveeLightController(LightController):
 
         url = f"{GOVEE_BASE_URL}/router/api/v1/device/control"
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT_SEC)
+            session = _get_session()
+            response = session.post(url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT_SEC)
             if 200 <= response.status_code < 300:
                 LOGGER.info("Govee command success. capability=%s value=%s", capability, value)
                 return True

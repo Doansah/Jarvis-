@@ -12,6 +12,15 @@ from lighting import LightController
 
 LOGGER = logging.getLogger(__name__)
 
+_client: openai.OpenAI | None = None
+
+
+def _get_client() -> openai.OpenAI:
+    global _client
+    if _client is None:
+        _client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    return _client
+
 
 @dataclass
 class Intent:
@@ -81,7 +90,7 @@ def parse_smart_fallback(text: str) -> Intent:
 
     LOGGER.info("Smart fallback parsing: %r", text)
     try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        client = _get_client()
         response = client.chat.completions.create(
             model=SMART_INTENT_MODEL,
             messages=[
