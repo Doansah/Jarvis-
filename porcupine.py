@@ -83,11 +83,40 @@ class KeyboardWakeController(WakeController):
         return buf.getvalue()
 
 
-class PorcupineWakeController(WakeController):
-    """Porcupine-backed wake controller stub.
+class OpenWakeWordController(KeyboardWakeController):
+    """Always-on wake word detection using OpenWakeWord (hey_jarvis model).
 
-    TODO: Replace internals with real Porcupine SDK integration.
+    Inherits VAD-based record_segment() from KeyboardWakeController.
+    Falls back gracefully — catch ImportError/init errors in the caller.
     """
+
+    _OWW_CHUNK = 1280    # 80 ms at 16 kHz — required frame size for OWW
+    _OWW_THRESHOLD = 0.5
+
+    def __init__(self) -> None:
+        import openwakeword
+        from openwakeword.model import Model
+        openwakeword.utils.download_models(["hey_jarvis"])
+        self._model = Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+        LOGGER.info("OpenWakeWord initialised with model: hey_jarvis")
+
+    def wait_for_wake(self) -> None:
+        LOGGER.info("Listening for wake word 'hey Jarvis'...")
+        print("[Jarvis] Listening for 'hey Jarvis'...")
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16") as stream:
+            while True:
+                chunk, _ = stream.read(self._OWW_CHUNK)
+                audio = chunk[:, 0].flatten()
+                predictions = self._model.predict(audio)
+                score = float(predictions.get("hey_jarvis", 0.0))
+                if score >= self._OWW_THRESHOLD:
+                    LOGGER.info("Wake word detected (score=%.3f)", score)
+                    print(f"[Jarvis] Wake word detected! (confidence={score:.2f})")
+                    return
+
+
+class PorcupineWakeController(WakeController):
+    """Porcupine-backed wake controller stub (requires Picovoice access key)."""
 
     def wait_for_wake(self) -> None:
         LOGGER.info("Waiting for wake word (Porcupine stub)...")

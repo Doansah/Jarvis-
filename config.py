@@ -8,6 +8,7 @@ load_dotenv()
 
 # Runtime toggles
 USE_SMART_INTENT_FALLBACK = os.getenv("USE_SMART_INTENT_FALLBACK", "true").lower() == "true"
+USE_WAKE_WORD = os.getenv("USE_WAKE_WORD", "true").lower() == "true"
 WAKE_RECORD_SECONDS = int(os.getenv("WAKE_RECORD_SECONDS", "7"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 

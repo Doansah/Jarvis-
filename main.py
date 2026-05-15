@@ -3,9 +3,9 @@
 import logging
 
 from actions import dispatch_intent, parse_deterministic, parse_smart_fallback
-from config import LOG_LEVEL, USE_SMART_INTENT_FALLBACK, WAKE_RECORD_SECONDS
+from config import LOG_LEVEL, USE_SMART_INTENT_FALLBACK, USE_WAKE_WORD, WAKE_RECORD_SECONDS
 from lighting import GoveeLightController
-from porcupine import KeyboardWakeController
+from porcupine import KeyboardWakeController, OpenWakeWordController
 from telemetry import CycleTimer
 from transcription import transcribe_whisper
 
@@ -18,9 +18,18 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 
 
+def _make_wake_controller():
+    if USE_WAKE_WORD:
+        try:
+            return OpenWakeWordController()
+        except Exception as exc:
+            LOGGER.warning("OpenWakeWord unavailable (%s) — falling back to keyboard", exc)
+    return KeyboardWakeController()
+
+
 def run_once() -> None:
     """Run a single wake→record→transcribe→parse→dispatch cycle."""
-    wake_engine = KeyboardWakeController()
+    wake_engine = _make_wake_controller()
     lights = GoveeLightController()
     timer = CycleTimer()
 
