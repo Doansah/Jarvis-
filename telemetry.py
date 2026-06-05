@@ -3,7 +3,10 @@
 import logging
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Generator
+
+COMMAND_LOG_PATH = "/tmp/jarvis_commands.log"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,3 +73,29 @@ class CycleTimer:
             total_ms,
             {label: f"{ms:.0f}ms" for label, ms in self._steps},
         )
+
+    def write_command_log(
+        self,
+        transcript: str = "",
+        action: str = "",
+        target: str = "",
+        intent_source: str = "",
+        intent_known: bool = False,
+    ) -> None:
+        total_ms = sum(ms for _, ms in self._steps)
+        steps_str = " · ".join(f"{label} {ms:,.0f}ms" for label, ms in self._steps)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        if intent_known:
+            intent_str = f"{action} {target}"
+        else:
+            intent_str = "UNKNOWN"
+
+        source_label = "AI fallback" if intent_source == "smart_fallback" else "deterministic"
+        line = f'[{timestamp}] "{transcript}" → {intent_str} | {source_label} | {total_ms:,.0f}ms  ({steps_str})\n'
+
+        try:
+            with open(COMMAND_LOG_PATH, "a") as f:
+                f.write(line)
+        except OSError as exc:
+            LOGGER.warning("Could not write command log: %s", exc)

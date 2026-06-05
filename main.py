@@ -67,6 +67,13 @@ def run_once() -> None:
         intent_source=intent.source,
         intent_known=intent.known,
     )
+    timer.write_command_log(
+        transcript=transcript,
+        action=intent.action,
+        target=intent.target,
+        intent_source=intent.source,
+        intent_known=intent.known,
+    )
 
 
 def run_forever() -> None:

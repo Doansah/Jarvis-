@@ -12,6 +12,34 @@ from lighting import LightController
 
 LOGGER = logging.getLogger(__name__)
 
+COLOR_MAP: dict[str, tuple[int, int, int]] = {
+    "red":    (255, 0, 0),
+    "green":  (0, 200, 0),
+    "blue":   (0, 0, 255),
+    "yellow": (255, 220, 0),
+    "orange": (255, 100, 0),
+    "purple": (128, 0, 255),
+    "pink":   (255, 20, 147),
+    "white":  (255, 255, 255),
+    "cyan":   (0, 200, 200),
+    "teal":   (0, 180, 180),
+}
+
+PRESETS: dict[str, dict] = {
+    "warm":    {"brightness": 40,  "color": (255, 100, 30)},
+    "cozy":    {"brightness": 40,  "color": (255, 100, 30)},
+    "cold":    {"brightness": 100, "color": (180, 210, 255)},
+    "cool":    {"brightness": 100, "color": (180, 210, 255)},
+    "focus":   {"brightness": 100, "color": (180, 210, 255)},
+    "night":   {"brightness": 5,   "color": (255, 40, 0)},
+    "sleep":   {"brightness": 5,   "color": (255, 40, 0)},
+    "morning": {"brightness": 100, "color": (255, 255, 200)},
+    "movie":   {"brightness": 15,  "color": (80, 0, 120)},
+    "cinema":  {"brightness": 15,  "color": (80, 0, 120)},
+    "relax":   {"brightness": 50,  "color": (255, 140, 60)},
+    "chill":   {"brightness": 50,  "color": (255, 140, 60)},
+}
+
 _client: openai.OpenAI | None = None
 
 
@@ -29,6 +57,8 @@ class Intent:
     action: str = "UNKNOWN"
     target: str = "ALL"
     value: int | None = None
+    color: tuple[int, int, int] | None = None
+    preset: str | None = None
     known: bool = False
     source: str = "deterministic"
     raw_text: str = ""
@@ -63,21 +93,35 @@ def parse_deterministic(text: str) -> Intent:
             raw_text=text,
         )
 
+    for preset_name in PRESETS:
+        if preset_name in normalized:
+            return Intent(action="APPLY_PRESET", target=target, preset=preset_name, known=True, raw_text=text)
+
+    for color_name, rgb in COLOR_MAP.items():
+        if color_name in normalized:
+            return Intent(action="SET_COLOR", target=target, color=rgb, known=True, raw_text=text)
+
     return Intent(raw_text=text)
 
 
 _SYSTEM_PROMPT = """You are a smart home intent parser. Given a voice command, return ONLY a JSON object with these fields:
-- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, UNKNOWN
+- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, SET_COLOR, APPLY_PRESET, UNKNOWN
 - target: one of ALL, TALL_LAMP, SHORT_LAMP, RICE_PAPER
 - value: integer 0-100 for SET_BRIGHTNESS, otherwise null
+- r, g, b: integers 0-255 for SET_COLOR (omit for other actions)
+- preset: string for APPLY_PRESET — one of: warm, cozy, cold, cool, focus, night, sleep, morning, movie, cinema, relax, chill (omit for other actions)
 
 Devices: TALL_LAMP is "Dillon's Lamp", SHORT_LAMP is the short bedside lamp, RICE_PAPER is the rice paper lamp.
 
 Examples:
-"make it cozy" -> {"action": "SET_BRIGHTNESS", "target": "ALL", "value": 30}
 "lights out" -> {"action": "LIGHT_OFF", "target": "ALL", "value": null}
 "brighten the tall lamp" -> {"action": "SET_BRIGHTNESS", "target": "TALL_LAMP", "value": 80}
 "turn off the short one" -> {"action": "LIGHT_OFF", "target": "SHORT_LAMP", "value": null}
+"make it red" -> {"action": "SET_COLOR", "target": "ALL", "r": 255, "g": 0, "b": 0}
+"blue light on the tall lamp" -> {"action": "SET_COLOR", "target": "TALL_LAMP", "r": 0, "g": 0, "b": 255}
+"warm mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "warm"}
+"focus mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "focus"}
+"movie time" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "movie"}
 
 Return only the JSON object, no explanation."""
 
@@ -104,8 +148,12 @@ def parse_smart_fallback(text: str) -> Intent:
         action = data.get("action", "UNKNOWN").upper()
         target = data.get("target", "ALL").upper()
         value = data.get("value")
+        color = None
+        if action == "SET_COLOR" and all(k in data for k in ("r", "g", "b")):
+            color = (int(data["r"]), int(data["g"]), int(data["b"]))
+        preset = data.get("preset")
         known = action != "UNKNOWN"
-        return Intent(action=action, target=target, value=value, known=known, source="smart_fallback", raw_text=text)
+        return Intent(action=action, target=target, value=value, color=color, preset=preset, known=known, source="smart_fallback", raw_text=text)
     except Exception as exc:
         LOGGER.warning("Smart fallback failed (%s); returning unknown intent.", exc)
         return Intent(raw_text=text, source="smart_fallback")
@@ -127,6 +175,18 @@ def dispatch_intent(intent: Intent, lights: LightController) -> None:
 
     if intent.action == "SET_BRIGHTNESS" and intent.value is not None:
         lights.set_brightness(intent.target, intent.value)
+        return
+
+    if intent.action == "SET_COLOR" and intent.color is not None:
+        r, g, b = intent.color
+        lights.set_color(intent.target, r, g, b)
+        return
+
+    if intent.action == "APPLY_PRESET" and intent.preset is not None:
+        p = PRESETS.get(intent.preset)
+        if p:
+            lights.set_color(intent.target, *p["color"])
+            lights.set_brightness(intent.target, p["brightness"])
         return
 
     LOGGER.info("Unhandled known intent logged only: %s", intent)

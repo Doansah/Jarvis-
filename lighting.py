@@ -45,6 +45,10 @@ class LightController(ABC):
     def set_brightness(self, target: str, value: int) -> bool:
         raise NotImplementedError
 
+    @abstractmethod
+    def set_color(self, target: str, r: int, g: int, b: int) -> bool:
+        raise NotImplementedError
+
 
 class GoveeLightController(LightController):
     """Govee OpenAPI implementation."""
@@ -58,6 +62,10 @@ class GoveeLightController(LightController):
     def set_brightness(self, target: str, value: int) -> bool:
         brightness = max(0, min(100, value))
         return self._apply(target, capability="brightness", value=brightness)
+
+    def set_color(self, target: str, r: int, g: int, b: int) -> bool:
+        color_val = (r << 16) | (g << 8) | b
+        return self._apply(target, capability="colorRgb", value=color_val)
 
     def _apply(self, target: str, capability: str, value: int) -> bool:
         devices = self._resolve_targets(target)
