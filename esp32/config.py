@@ -4,8 +4,8 @@ Fill in your credentials below, then upload to the ESP32.
 Copy device SKUs and IDs from the root Jarvis config.py.
 """
 
-WIFI_SSID = "your_wifi_ssid"
-WIFI_PASSWORD = "your_wifi_password"
+WIFI_SSID = "GoucherGuest"
+WIFI_PASSWORD = ""
 
 GOVEE_API_KEY = "your_govee_api_key"
 GOVEE_BASE_URL = "https://openapi.api.govee.com"

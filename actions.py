@@ -12,6 +12,8 @@ from lighting import LightController
 
 LOGGER = logging.getLogger(__name__)
 
+_SLEEP_TRIGGERS = {"sleep", "goodbye", "good night", "goodnight", "shut down", "shutdown", "stop listening", "go to sleep"}
+
 COLOR_MAP: dict[str, tuple[int, int, int]] = {
     "red":    (255, 0, 0),
     "green":  (0, 200, 0),
@@ -50,6 +52,10 @@ def _get_client() -> openai.OpenAI:
     return _client
 
 
+class SleepRequested(Exception):
+    """Raised when the user asks Jarvis to stop listening."""
+
+
 @dataclass
 class Intent:
     """Normalized command intent."""
@@ -75,6 +81,9 @@ def parse_deterministic(text: str) -> Intent:
         target = "SHORT_LAMP"
     elif "rice paper" in normalized:
         target = "RICE_PAPER"
+
+    if any(trigger in normalized for trigger in _SLEEP_TRIGGERS):
+        return Intent(action="SLEEP", known=True, raw_text=text)
 
     if "light" in normalized or "lamp" in normalized:
         if " off" in f" {normalized}" or normalized.startswith("off"):
@@ -105,7 +114,7 @@ def parse_deterministic(text: str) -> Intent:
 
 
 _SYSTEM_PROMPT = """You are a smart home intent parser. Given a voice command, return ONLY a JSON object with these fields:
-- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, SET_COLOR, APPLY_PRESET, UNKNOWN
+- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, SET_COLOR, APPLY_PRESET, SLEEP, UNKNOWN
 - target: one of ALL, TALL_LAMP, SHORT_LAMP, RICE_PAPER
 - value: integer 0-100 for SET_BRIGHTNESS, otherwise null
 - r, g, b: integers 0-255 for SET_COLOR (omit for other actions)
@@ -122,6 +131,8 @@ Examples:
 "warm mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "warm"}
 "focus mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "focus"}
 "movie time" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "movie"}
+"goodbye jarvis" -> {"action": "SLEEP", "target": "ALL", "value": null}
+"go to sleep" -> {"action": "SLEEP", "target": "ALL", "value": null}
 
 Return only the JSON object, no explanation."""
 
@@ -164,6 +175,9 @@ def dispatch_intent(intent: Intent, lights: LightController) -> None:
     if not intent.known:
         LOGGER.info("Unknown intent logged only: %s", intent.raw_text)
         return
+
+    if intent.action == "SLEEP":
+        raise SleepRequested
 
     if intent.action == "LIGHT_ON":
         lights.turn_on(intent.target)

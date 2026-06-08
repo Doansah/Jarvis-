@@ -20,9 +20,12 @@ btn_power = Pin(14, Pin.IN, Pin.PULL_UP)  # toggles lights on/off
 # ── Presets ──────────────────────────────────────────────────────────────────
 
 PRESETS = [
-    {"name": "Day Time",  "brightness": 100, "r": 255, "g": 255, "b": 200},
-    {"name": "Wind Down", "brightness": 40,  "r": 255, "g": 80,  "b": 10},
-    {"name": "Wacky",     "brightness": 100, "r": 140, "g": 0,   "b": 255},
+    {"name": "Morning",  "brightness": 100, "r": 255, "g": 255, "b": 200},
+    {"name": "Focus",    "brightness": 100, "r": 180, "g": 210, "b": 255},
+    {"name": "Relax",    "brightness": 50,  "r": 255, "g": 140, "b": 60},
+    {"name": "Warm",     "brightness": 40,  "r": 255, "g": 100, "b": 30},
+    {"name": "Movie",    "brightness": 15,  "r": 80,  "g": 0,   "b": 120},
+    {"name": "Night",    "brightness": 5,   "r": 255, "g": 40,  "b": 0},
 ]
 
 state = {"preset": 0, "power": False}

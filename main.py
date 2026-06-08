@@ -2,7 +2,7 @@
 
 import logging
 
-from actions import dispatch_intent, parse_deterministic, parse_smart_fallback
+from actions import SleepRequested, dispatch_intent, parse_deterministic, parse_smart_fallback
 from config import LOG_LEVEL, USE_SMART_INTENT_FALLBACK, USE_WAKE_WORD, WAKE_RECORD_SECONDS
 from lighting import GoveeLightController
 from porcupine import KeyboardWakeController, OpenWakeWordController
@@ -80,7 +80,11 @@ def run_forever() -> None:
     """Continuously run wake cycles."""
     LOGGER.info("Jarvis started — USE_SMART_INTENT_FALLBACK=%s", USE_SMART_INTENT_FALLBACK)
     while True:
-        run_once()
+        try:
+            run_once()
+        except SleepRequested:
+            LOGGER.info("Sleep requested — Jarvis shutting down.")
+            break
 
 
 if __name__ == "__main__":

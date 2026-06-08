@@ -15,7 +15,10 @@ def connect():
     if wlan.isconnected():
         return True
 
-    wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
+    if config.WIFI_PASSWORD:
+        wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
+    else:
+        wlan.connect(config.WIFI_SSID)
 
     deadline = time.time() + _TIMEOUT_SEC
     while not wlan.isconnected():
