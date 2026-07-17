@@ -7,12 +7,25 @@ import re
 
 import openai
 
+import user_settings
 from config import OPENAI_API_KEY, SMART_INTENT_MODEL
 from lighting import LightController
 
 LOGGER = logging.getLogger(__name__)
 
 _SLEEP_TRIGGERS = {"sleep", "goodbye", "good night", "goodnight", "shut down", "shutdown", "stop listening", "go to sleep"}
+
+_CALIBRATE_TRIGGERS = {
+    "set this as my default", "make this my default", "make this default",
+    "save this as default", "save as default", "set as default",
+    "remember this setting", "remember these settings",
+    "calibrate my lights", "calibrate lights", "calibrate the lights",
+}
+_DEFAULT_RECALL_TRIGGERS = {
+    "default lighting", "default light", "default mode",
+    "normal lighting", "normal light",
+    "reset to default", "reset the lights", "reset lights",
+}
 
 COLOR_MAP: dict[str, tuple[int, int, int]] = {
     "red":    (255, 0, 0),
@@ -28,8 +41,10 @@ COLOR_MAP: dict[str, tuple[int, int, int]] = {
 }
 
 PRESETS: dict[str, dict] = {
-    "warm":    {"brightness": 40,  "color": (255, 100, 30)},
-    "cozy":    {"brightness": 40,  "color": (255, 100, 30)},
+    # Native color temperature (Kelvin), not an RGB approximation — reads as
+    # true warm-white instead of orange.
+    "warm":    {"brightness": 40,  "kelvin": 2700},
+    "cozy":    {"brightness": 40,  "kelvin": 2700},
     "cold":    {"brightness": 100, "color": (180, 210, 255)},
     "cool":    {"brightness": 100, "color": (180, 210, 255)},
     "focus":   {"brightness": 100, "color": (180, 210, 255)},
@@ -41,6 +56,12 @@ PRESETS: dict[str, dict] = {
     "relax":   {"brightness": 50,  "color": (255, 140, 60)},
     "chill":   {"brightness": 50,  "color": (255, 140, 60)},
 }
+
+_DECREASE_WORDS = ("decrease", "lower", "down", "dim", "reduce", "less")
+_INCREASE_WORDS = ("increase", "raise", "up", "brighten", "brighter", "more", "higher")
+# These direction words imply a brightness change on their own, without
+# needing "bright"/"brightness" to also appear in the phrase.
+_INHERENT_BRIGHTNESS_WORDS = {"dim", "brighten", "brighter"}
 
 _client: openai.OpenAI | None = None
 
@@ -62,12 +83,46 @@ class Intent:
 
     action: str = "UNKNOWN"
     target: str = "ALL"
+    # `value` is overloaded by action: for SET_BRIGHTNESS it is an absolute
+    # brightness (0-100); for ADJUST_BRIGHTNESS it is a signed delta (e.g.
+    # -10 to dim by 10, +15 to brighten by 15) applied to the device's
+    # current brightness and clamped to 0-100 by the light controller.
     value: int | None = None
     color: tuple[int, int, int] | None = None
     preset: str | None = None
     known: bool = False
     source: str = "deterministic"
     raw_text: str = ""
+
+
+def _match_relative_brightness(normalized: str) -> int | None:
+    """Return a signed brightness delta if `normalized` is a relative
+    brightness phrase (a direction word plus a number), else None.
+
+    Requires both a direction word (e.g. "decrease", "brighten") and a
+    number. Direction words that aren't inherently about brightness (up,
+    down, more, less, raise, lower, increase, decrease, reduce, higher)
+    also require "bright"/"brightness" to appear somewhere in the phrase,
+    so unrelated commands with numbers don't get misrouted.
+    """
+    number_match = re.search(r"\d{1,3}", normalized)
+    if not number_match:
+        return None
+    amount = int(number_match.group(0))
+
+    direction_word = None
+    for word in _DECREASE_WORDS + _INCREASE_WORDS:
+        if re.search(rf"\b{word}\b", normalized):
+            direction_word = word
+            break
+    if direction_word is None:
+        return None
+
+    if direction_word not in _INHERENT_BRIGHTNESS_WORDS and "bright" not in normalized:
+        return None
+
+    sign = -1 if direction_word in _DECREASE_WORDS else 1
+    return sign * amount
 
 
 def parse_deterministic(text: str) -> Intent:
@@ -85,11 +140,27 @@ def parse_deterministic(text: str) -> Intent:
     if any(trigger in normalized for trigger in _SLEEP_TRIGGERS):
         return Intent(action="SLEEP", known=True, raw_text=text)
 
+    if any(trigger in normalized for trigger in _CALIBRATE_TRIGGERS):
+        return Intent(action="SET_DEFAULT", target=target, known=True, raw_text=text)
+
+    if any(trigger in normalized for trigger in _DEFAULT_RECALL_TRIGGERS):
+        return Intent(action="APPLY_DEFAULT", target=target, known=True, raw_text=text)
+
     if "light" in normalized or "lamp" in normalized:
         if " off" in f" {normalized}" or normalized.startswith("off"):
             return Intent(action="LIGHT_OFF", target=target, known=True, raw_text=text)
         if " on" in f" {normalized}" or normalized.startswith("on"):
             return Intent(action="LIGHT_ON", target=target, known=True, raw_text=text)
+
+    relative_delta = _match_relative_brightness(normalized)
+    if relative_delta is not None:
+        return Intent(
+            action="ADJUST_BRIGHTNESS",
+            target=target,
+            value=relative_delta,
+            known=True,
+            raw_text=text,
+        )
 
     brightness_match = re.search(r"(?:brightness|bright)\D*(\d{1,3})", normalized)
     if brightness_match:
@@ -114,23 +185,30 @@ def parse_deterministic(text: str) -> Intent:
 
 
 _SYSTEM_PROMPT = """You are a smart home intent parser. Given a voice command, return ONLY a JSON object with these fields:
-- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, SET_COLOR, APPLY_PRESET, SLEEP, UNKNOWN
+- action: one of LIGHT_ON, LIGHT_OFF, SET_BRIGHTNESS, ADJUST_BRIGHTNESS, SET_COLOR, APPLY_PRESET, SET_DEFAULT, APPLY_DEFAULT, SLEEP, UNKNOWN
 - target: one of ALL, TALL_LAMP, SHORT_LAMP, RICE_PAPER
-- value: integer 0-100 for SET_BRIGHTNESS, otherwise null
+- value: integer 0-100 for SET_BRIGHTNESS (absolute level); signed integer delta for ADJUST_BRIGHTNESS (e.g. -10 to dim by 10, +15 to brighten by 15); otherwise null
 - r, g, b: integers 0-255 for SET_COLOR (omit for other actions)
 - preset: string for APPLY_PRESET — one of: warm, cozy, cold, cool, focus, night, sleep, morning, movie, cinema, relax, chill (omit for other actions)
 
 Devices: TALL_LAMP is "Dillon's Lamp", SHORT_LAMP is the short bedside lamp, RICE_PAPER is the rice paper lamp.
 
+Use ADJUST_BRIGHTNESS (not SET_BRIGHTNESS) whenever the command describes a relative change off the current brightness (e.g. "a bit dimmer", "a touch brighter") rather than an exact target level.
+
+Use SET_DEFAULT when the user wants to save the lights' CURRENT live state as their personal default (calibration) — e.g. "remember this", "make this my default". Use APPLY_DEFAULT when the user wants to recall/reset to that saved default without necessarily naming a preset — e.g. "go back to normal", "default lighting".
+
 Examples:
 "lights out" -> {"action": "LIGHT_OFF", "target": "ALL", "value": null}
 "brighten the tall lamp" -> {"action": "SET_BRIGHTNESS", "target": "TALL_LAMP", "value": 80}
 "turn off the short one" -> {"action": "LIGHT_OFF", "target": "SHORT_LAMP", "value": null}
+"make it a little dimmer" -> {"action": "ADJUST_BRIGHTNESS", "target": "ALL", "value": -10}
 "make it red" -> {"action": "SET_COLOR", "target": "ALL", "r": 255, "g": 0, "b": 0}
 "blue light on the tall lamp" -> {"action": "SET_COLOR", "target": "TALL_LAMP", "r": 0, "g": 0, "b": 255}
 "warm mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "warm"}
 "focus mode" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "focus"}
 "movie time" -> {"action": "APPLY_PRESET", "target": "ALL", "preset": "movie"}
+"remember this as my default" -> {"action": "SET_DEFAULT", "target": "ALL", "value": null}
+"go back to my normal lighting" -> {"action": "APPLY_DEFAULT", "target": "ALL", "value": null}
 "goodbye jarvis" -> {"action": "SLEEP", "target": "ALL", "value": null}
 "go to sleep" -> {"action": "SLEEP", "target": "ALL", "value": null}
 
@@ -170,6 +248,17 @@ def parse_smart_fallback(text: str) -> Intent:
         return Intent(raw_text=text, source="smart_fallback")
 
 
+def _apply_default_lighting(lights: LightController, target: str) -> None:
+    """Assert the user's calibrated default (or the factory warm-white
+    default if nothing has been calibrated yet) onto `target`."""
+    settings = user_settings.load_default()
+    if settings.get("mode") == "kelvin" and settings.get("kelvin") is not None:
+        lights.set_color_temperature(target, settings["kelvin"])
+    elif settings.get("rgb") is not None:
+        lights.set_color(target, *settings["rgb"])
+    lights.set_brightness(target, settings.get("brightness", 40))
+
+
 def dispatch_intent(intent: Intent, lights: LightController) -> None:
     """Execute known intents through the light controller; otherwise log."""
     if not intent.known:
@@ -181,6 +270,26 @@ def dispatch_intent(intent: Intent, lights: LightController) -> None:
 
     if intent.action == "LIGHT_ON":
         lights.turn_on(intent.target)
+        # Assert the calibrated default explicitly rather than trusting
+        # whatever color/brightness the bulb last remembered.
+        _apply_default_lighting(lights, intent.target)
+        return
+
+    if intent.action == "SET_DEFAULT":
+        state = lights.capture_current_state(intent.target)
+        if not state or state.get("brightness") is None:
+            LOGGER.warning("Could not read current light state; calibration not saved.")
+            return
+        user_settings.save_default(
+            brightness=state["brightness"],
+            kelvin=state.get("kelvin"),
+            rgb=state.get("rgb") if state.get("mode") == "rgb" else None,
+            captured_from=intent.target,
+        )
+        return
+
+    if intent.action == "APPLY_DEFAULT":
+        _apply_default_lighting(lights, intent.target)
         return
 
     if intent.action == "LIGHT_OFF":
@@ -191,6 +300,10 @@ def dispatch_intent(intent: Intent, lights: LightController) -> None:
         lights.set_brightness(intent.target, intent.value)
         return
 
+    if intent.action == "ADJUST_BRIGHTNESS" and intent.value is not None:
+        lights.adjust_brightness(intent.target, intent.value)
+        return
+
     if intent.action == "SET_COLOR" and intent.color is not None:
         r, g, b = intent.color
         lights.set_color(intent.target, r, g, b)
@@ -199,7 +312,10 @@ def dispatch_intent(intent: Intent, lights: LightController) -> None:
     if intent.action == "APPLY_PRESET" and intent.preset is not None:
         p = PRESETS.get(intent.preset)
         if p:
-            lights.set_color(intent.target, *p["color"])
+            if "kelvin" in p:
+                lights.set_color_temperature(intent.target, p["kelvin"])
+            else:
+                lights.set_color(intent.target, *p["color"])
             lights.set_brightness(intent.target, p["brightness"])
         return
 
